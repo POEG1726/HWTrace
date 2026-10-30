@@ -39,3 +39,5 @@ Run receiver tests with `python3 -m unittest discover -s tests -v`. Use `python3
 The shared memory layout and defensive bounds checks were informed by [sensorwatch](https://github.com/lcjanke2020/sensorwatch) at commit `929e4d879f6276067ac9e95c420d60c3a653fabb`. Its license is reproduced in `SENSORWATCH-LICENSE.txt`.
 
 For read-only acquisition diagnostics, run `.\build\hwtrace.exe --diagnose`. It reports the exact Windows error without opening SSH or starting collection. Live-target investigation details are in `docs/troubleshooting.md`.
+
+Native regression fixtures can be built with the same MinGW compiler: `tests/test_native_units.c` and `tests/test_native_snapshot.c`. The latter emits JSONL exercising metadata for initially non-finite readings followed by a valid sample; feed it through the receiver to verify foreign-key-safe ingestion.
