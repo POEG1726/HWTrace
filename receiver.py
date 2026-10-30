@@ -92,6 +92,7 @@ def ingest(db, obj):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--db', required=True, help='SQLite database path on the receiver')
+    p.add_argument('--ack', action='store_true', help='acknowledge each committed record on stdout')
     args = p.parse_args()
     db = sqlite3.connect(args.db, timeout=10)
     db.executescript(SCHEMA)
@@ -101,6 +102,9 @@ def main():
                 raise ValueError('line too long')
             obj = json.loads(line, parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)))
             ingest(db, obj)
+            if args.ack:
+                sys.stdout.buffer.write(b'OK\n')
+                sys.stdout.buffer.flush()
         except (ValueError, TypeError, KeyError, sqlite3.Error, UnicodeDecodeError) as exc:
             print('HWTrace: invalid record: ' + str(exc), file=sys.stderr, flush=True)
             return 1

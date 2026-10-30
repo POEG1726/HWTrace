@@ -1,0 +1,20 @@
+# Case-insensitive substrings matched against HWiNFO reading names.
+SPD Hub Temperature
+VDD (SWA) Voltage
+VDDQ (SWB) Voltage
+PMIC High Temperature
+PMIC Over Voltage
+PMIC Under Voltage
+CPU VCORE SoC
+CPU VDDCR_SOC Voltage
+CPU VDDIO_MEM
+CPU (Tctl/Tdie)
+CPU Die (average)
+CPU IOD Hotspot
+Physical Memory Used
+Physical Memory Available
+Physical Memory Load
+Virtual Memory Committed
+Virtual Memory Available
+Virtual Memory Load
+WHEA|Total Errors

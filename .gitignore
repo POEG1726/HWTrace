@@ -10,3 +10,8 @@ __pycache__/
 build/
 target/
 .env
+
+example.csv
+task_plan.md
+findings.md
+progress.md
