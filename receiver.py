@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """HWTrace JSONL receiver. Run on the Linux host as an SSH command."""
 import argparse
+import base64
+import hashlib
+import os
+from pathlib import Path
+import re
+import tempfile
 import json
 import math
 import sqlite3
@@ -26,6 +32,14 @@ CREATE TABLE IF NOT EXISTS samples (
   FOREIGN KEY(session, seq) REFERENCES records(session, seq),
   FOREIGN KEY(session, sensor_id, sensor_instance, reading_id)
     REFERENCES sensors(session, sensor_id, sensor_instance, reading_id)
+);
+CREATE TABLE IF NOT EXISTS record_timing (
+  session TEXT NOT NULL, seq INTEGER NOT NULL, elapsed_ms INTEGER NOT NULL,
+  PRIMARY KEY(session,seq), FOREIGN KEY(session,seq) REFERENCES records(session,seq)
+);
+CREATE TABLE IF NOT EXISTS startup_captures (
+  capture_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, source_host TEXT NOT NULL,
+  process_name TEXT NOT NULL, path TEXT NOT NULL, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS events (
   session TEXT NOT NULL, seq INTEGER NOT NULL, event TEXT NOT NULL, detail TEXT NOT NULL,
@@ -59,6 +73,11 @@ def ingest(db, obj):
                               (session, seq, timestamp, kind)).rowcount
         if not inserted:
             return False
+        if 'elapsed_ms' in obj:
+            elapsed = obj['elapsed_ms']
+            if type(elapsed) is not int or not 0 <= elapsed <= 0x7fffffffffffffff:
+                raise ValueError('invalid elapsed_ms')
+            db.execute('INSERT INTO record_timing VALUES (?,?,?)', (session, seq, elapsed))
         if kind == 'metadata':
             for item in obj['sensors']:
                 sid, inst, rid = key(item)
@@ -89,11 +108,69 @@ def ingest(db, obj):
             db.execute('INSERT INTO events VALUES (?,?,?,?)', (session, seq, event, detail))
     return True
 
+MAX_SCREENSHOT = 32 * 1024 * 1024
+PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
+
+def store_screenshot(db_path, capture_id, timestamp, source_host, process_name, source):
+    if not re.fullmatch(r'[0-9a-f]{32}', capture_id):
+        raise ValueError('capture_id must be 32 lowercase hex characters')
+    timestamp, source_host, process_name = string(timestamp, 64), string(source_host, 256), string(process_name, 256)
+    data = source.read(MAX_SCREENSHOT + 1)
+    if len(data) > MAX_SCREENSHOT or len(data) < 33 or not data.startswith(PNG_SIGNATURE) or data[12:16] != b'IHDR':
+        raise ValueError('invalid or oversized PNG')
+    width, height = int.from_bytes(data[16:20], 'big'), int.from_bytes(data[20:24], 'big')
+    if not 0 < width <= 32768 or not 0 < height <= 32768:
+        raise ValueError('invalid PNG dimensions')
+    root = Path(db_path).resolve().parent / 'screenshots'
+    root.mkdir(parents=True, exist_ok=True)
+    dest = root / (capture_id + '.png')
+    digest = hashlib.sha256(data).hexdigest()
+    db = sqlite3.connect(db_path, timeout=10)
+    temp = None
+    try:
+        db.executescript(SCHEMA)
+        previous = db.execute('SELECT sha256 FROM startup_captures WHERE capture_id=?', (capture_id,)).fetchone()
+        if previous:
+            if previous[0] != digest:
+                raise ValueError('capture_id already refers to another image')
+            return dest
+        with tempfile.NamedTemporaryFile(dir=root, prefix='.upload-', delete=False) as stream:
+            temp = Path(stream.name)
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp, dest)
+        temp = None
+        with db:
+            db.execute('INSERT INTO startup_captures VALUES (?,?,?,?,?,?,?)',
+                       (capture_id, timestamp, source_host, process_name, str(dest), digest, len(data)))
+        return dest
+    finally:
+        db.close()
+        if temp is not None:
+            temp.unlink(missing_ok=True)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--db', required=True, help='SQLite database path on the receiver')
     p.add_argument('--ack', action='store_true', help='acknowledge each committed record on stdout')
+    p.add_argument('--startup-screenshot', metavar='CAPTURE_ID')
+    p.add_argument('--captured-at')
+    p.add_argument('--source-host')
+    p.add_argument('--process-name-b64')
     args = p.parse_args()
+    if args.startup_screenshot:
+        try:
+            name = base64.b64decode(args.process_name_b64 or '', validate=True).decode('utf-8')
+            store_screenshot(args.db, args.startup_screenshot, args.captured_at,
+                             args.source_host, name, sys.stdin.buffer)
+            sys.stdout.buffer.write(('STORED ' + args.startup_screenshot + '\n').encode('ascii'))
+            sys.stdout.buffer.flush()
+            return 0
+        except (ValueError, TypeError, OSError, sqlite3.Error) as exc:
+            print('HWTrace: screenshot upload failed: ' + str(exc), file=sys.stderr)
+            return 1
     db = sqlite3.connect(args.db, timeout=10)
     db.executescript(SCHEMA)
     for line in sys.stdin.buffer:

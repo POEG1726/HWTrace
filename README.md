@@ -41,3 +41,14 @@ The shared memory layout and defensive bounds checks were informed by [sensorwat
 For read-only acquisition diagnostics, run `.\build\hwtrace.exe --diagnose`. It reports the exact Windows error without opening SSH or starting collection. Live-target investigation details are in `docs/troubleshooting.md`.
 
 Native regression fixtures can be built with the same MinGW compiler: `tests/test_native_units.c` and `tests/test_native_snapshot.c`. The latter emits JSONL exercising metadata for initially non-finite readings followed by a valid sample; feed it through the receiver to verify foreign-key-safe ingestion.
+
+
+## Startup context and desktop screenshot
+
+Start with PowerShell 7 on the tested machine's logged-in desktop: `pwsh -NoProfile -File .\Start-HWTrace.ps1`. The launcher checks the configured process before the native collector starts. If it is already running, the launcher captures the entire virtual desktop once as a PNG in RAM and uploads it over SSH to the configured receiver. It does not save an image or telemetry log on the tested machine. The receiver stores it beside the database in `screenshots/<capture-id>.png`, with timestamp, source host, process name and SHA-256 in `startup_captures`. A `startup_context` event and a screenshot status event associate the capture ID with the telemetry session. No screenshot is taken when the monitored process is absent. Capture/upload failure produces a warning and a failure event while allowing telemetry to start. Running from a noninteractive SSH session does not provide a usable desktop; launch interactively for this feature.
+
+The native collector starts a monotonic elapsed clock when it launches. `record_timing` stores `elapsed_ms` keyed by session/sequence; existing `records` timestamps remain UTC. This is collection elapsed time, not a reconstruction of TM5 elapsed time when TM5 was already running. The startup screenshot preserves the displayed context for that case. If TM5 is absent, collection and timing begin normally; the collector still waits to observe TM5 before any post-exit auto-stop can occur.
+
+The expanded DDR5 profile includes all exposed Memory Timings, MCLK/FCLK/UCLK, CPU package/die/CCD/core/L3/IO-die temperatures, memory-related voltages, three CPU VRM temperatures, DRAM bandwidth, DIMM SPD/PMIC/auxiliary rails and per-DIMM power. Core and L3 readings are stored individually; CSV-only aggregate averages are not invented. Only timings exposed by HWiNFO are available.
+
+Run `pwsh -NoProfile -File tests/test_startup_capture.ps1` to test binary upload with a synthetic PNG and both process-presence branches without capturing a desktop. Python unit tests cover screenshot storage and monotonic-time ingestion. The receiver uses a one-off SSH upload for the startup screenshot and a persistent SSH connection for telemetry.

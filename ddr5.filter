@@ -1,16 +1,53 @@
-# Case-insensitive substrings matched against HWiNFO reading names.
-SPD Hub Temperature
-VDD (SWA) Voltage
-VDDQ (SWB) Voltage
-PMIC High Temperature
-PMIC Over Voltage
-PMIC Under Voltage
+# Case-insensitive sensor-group|reading substrings. Empty reading selects the group.
+# CPU temperatures, per-core temperatures, L3 temperatures/clocks and VRM temperatures.
+CPU [#|CPU (Tctl/Tdie)
+CPU [#|CPU Die (average)
+CPU [#|CPU CCD1 (Tdie)
+CPU [#|CPU CCD2 (Tdie)
+CPU [#|Core0 (CCD
+CPU [#|Core1 (CCD
+CPU [#|Core2 (CCD
+CPU [#|Core3 (CCD
+CPU [#|Core4 (CCD
+CPU [#|Core5 (CCD
+CPU [#|Core6 (CCD
+CPU [#|Core7 (CCD
+CPU [#|Core8 (CCD
+CPU [#|Core9 (CCD
+CPU [#|Core10 (CCD
+CPU [#|Core11 (CCD
+CPU [#|Core12 (CCD
+CPU [#|Core13 (CCD
+CPU [#|Core14 (CCD
+CPU [#|Core15 (CCD
+CPU [#|L3 Cache (CCD
+CPU [#|CPU IOD
+CPU [#|CPU IO Die
+CPU [#|CPU VDDCR_VDD VRM
+CPU [#|CPU VDDCR_SOC VRM
+CPU [#|CPU VDD_MISC VRM
+# CPU memory-related voltages, bandwidth, clocks and exposed timings.
 CPU VCORE SoC
 CPU VDDCR_SOC Voltage
 CPU VDDIO_MEM
-CPU (Tctl/Tdie)
-CPU Die (average)
-CPU IOD Hotspot
+CPU [#|DRAM Read Bandwidth
+CPU [#|DRAM Write Bandwidth
+CPU [#|Infinity Fabric Clock (FCLK)
+CPU [#|Memory Controller Clock (UCLK)
+Memory Timings|
+# All four DIMMs: temperature, PMIC rails, input/auxiliary rails, power and flags.
+DDR5 DIMM|SPD Hub Temperature
+DDR5 DIMM|VDD (SWA) Voltage
+DDR5 DIMM|VDDQ (SWB) Voltage
+DDR5 DIMM|VPP (SWC) Voltage
+DDR5 DIMM|VIN Voltage
+DDR5 DIMM|1.8V VOUT Voltage
+DDR5 DIMM|1.0V VOUT Voltage
+DDR5 DIMM|Total Power
+DDR5 DIMM|PMIC High Temperature
+DDR5 DIMM|PMIC Over Voltage
+DDR5 DIMM|PMIC Under Voltage
+# System memory pressure and hardware errors.
 Physical Memory Used
 Physical Memory Available
 Physical Memory Load

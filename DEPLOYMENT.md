@@ -10,9 +10,11 @@ Enable HWiNFO Shared Memory Support and set its polling interval to 500 ms, then
 
 ```powershell
 Set-Location C:\HWTrace
-Copy-Item collector.example.json collector.json
+if (-not (Test-Path collector.json)) { Copy-Item collector.example.json collector.json }
 # Edit collector.json before running the next command.
 pwsh -NoProfile -File .\Start-HWTrace.ps1
 ```
 
 The default process is TM5.exe and the post-exit delay is 600 seconds. Enter text followed by Enter for a manual marker. Ctrl+C stops the collector. No scheduled task, service, or startup entry is installed. The collector creates no local telemetry log or database.
+
+The deployed collector.json selects a versioned executable so copying an update cannot replace the active collector. Startup-Capture.ps1 is loaded by Start-HWTrace.ps1. A manual script restart is required to load a changed profile or executable. If TM5 is already present, one startup desktop screenshot is sent to the receiver; otherwise no screenshot is taken. The receiver's image directory is next to its database, under screenshots. No startup task or service is installed.
