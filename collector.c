@@ -21,6 +21,7 @@ static unsigned grace_ms=600000; static char ssh_command[4096];
 static HANDLE input_write, output_read, child; static volatile LONG child_running;
 static char linebuf[LINE]; static size_t used;
 static char marker[1024];
+static char source_error[256] = "No snapshot attempted";
 
 static void append(const char *fmt, ...) { va_list a; int n; if (used >= LINE-1) return; va_start(a,fmt); n=vsnprintf(linebuf+used,LINE-used,fmt,a); va_end(a); if(n<0 || (size_t)n>=LINE-used) used=LINE; else used+=(size_t)n; }
 static void jsonstr(const char *s) { const unsigned char *p=(const unsigned char*)s; append("\""); for(;*p;p++) { if(*p=='"'||*p=='\\') append("\\%c",*p); else if(*p<32) append("\\u%04x",*p); else append("%c",*p); } append("\""); }
@@ -53,14 +54,35 @@ static DWORD WINAPI keyboard(void *unused) {
     }
     return 0;
 }
-static unsigned char *snapshot(size_t *len) { HANDLE h=OpenFileMappingW(FILE_MAP_READ,FALSE,L"Global\\HWiNFO_SENS_SM2"); void *p; MEMORY_BASIC_INFORMATION mbi; unsigned char *b=NULL; if(!h) return NULL; p=MapViewOfFile(h,FILE_MAP_READ,0,0,0); if(p && VirtualQuery(p,&mbi,sizeof mbi) && mbi.RegionSize>=48 && mbi.RegionSize<=64*1024*1024) { *len=mbi.RegionSize; b=malloc(*len); if(b) memcpy(b,p,*len); } if(p) UnmapViewOfFile(p); CloseHandle(h); return b; }
-static int read_sensor(int metadata) { size_t len; unsigned char *b=snapshot(&len); uint32_t so,ss,sc,eo,es,ec,i; int found=0; if(!b) return -1; so=u32(b+20); ss=u32(b+24); sc=u32(b+28); eo=u32(b+32); es=u32(b+36); ec=u32(b+40); if(u32(b)!=0x53695748 || so<48 || eo<48 || ss<264 || es<316 || sc>4096 || ec>65536 || (uint64_t)so+(uint64_t)ss*sc>len || (uint64_t)eo+(uint64_t)es*ec>len || (so<(uint64_t)eo+(uint64_t)es*ec && eo<(uint64_t)so+(uint64_t)ss*sc)) { free(b); return -1; }
+static unsigned char *snapshot(size_t *len) {
+    HANDLE h; void *p; MEMORY_BASIC_INFORMATION mbi; unsigned char *b=NULL;
+    h=OpenFileMappingW(FILE_MAP_READ,FALSE,L"Global\\HWiNFO_SENS_SM2");
+    if(!h) { snprintf(source_error,sizeof source_error,"OpenFileMappingW(Global\\HWiNFO_SENS_SM2) failed: Win32=%lu",GetLastError()); return NULL; }
+    p=MapViewOfFile(h,FILE_MAP_READ,0,0,0);
+    if(!p) snprintf(source_error,sizeof source_error,"MapViewOfFile failed: Win32=%lu",GetLastError());
+    else if(!VirtualQuery(p,&mbi,sizeof mbi)) snprintf(source_error,sizeof source_error,"VirtualQuery failed: Win32=%lu",GetLastError());
+    else if(mbi.RegionSize<48 || mbi.RegionSize>64*1024*1024) snprintf(source_error,sizeof source_error,"Invalid mapping region size: %llu",(unsigned long long)mbi.RegionSize);
+    else {
+        *len=mbi.RegionSize; b=malloc(*len);
+        if(b) memcpy(b,p,*len);
+        else snprintf(source_error,sizeof source_error,"Snapshot allocation failed: %llu bytes",(unsigned long long)*len);
+    }
+    if(p) UnmapViewOfFile(p);
+    CloseHandle(h);
+    return b;
+}
+static int read_sensor(int metadata) { size_t len; unsigned char *b=snapshot(&len); uint32_t so,ss,sc,eo,es,ec,i; int found=0; if(!b) return -1; so=u32(b+20); ss=u32(b+24); sc=u32(b+28); eo=u32(b+32); es=u32(b+36); ec=u32(b+40); if(u32(b)!=0x53695748 || so<48 || eo<48 || ss<264 || es<316 || sc>4096 || ec>65536 || (uint64_t)so+(uint64_t)ss*sc>len || (uint64_t)eo+(uint64_t)es*ec>len || (so<(uint64_t)eo+(uint64_t)es*ec && eo<(uint64_t)so+(uint64_t)ss*sc)) { snprintf(source_error,sizeof source_error,"Malformed HWiNFO header: magic=%08x sensors=%u entries=%u",u32(b),sc,ec); free(b); return -1; }
  begin(metadata?"metadata":"sample"); append(metadata?",\"sensors\":[":",\"values\":[");
  for(i=0;i<ec;i++) { unsigned char *e=b+eo+(size_t)i*es,*s; uint32_t idx=u32(e+4); char sn[512],rn[512],unit[100]; double v; if(idx>=sc) continue; s=b+so+(size_t)idx*ss; strfield(sn,sizeof sn,s+136,128); if(!*sn) strfield(sn,sizeof sn,s+8,128); strfield(rn,sizeof rn,e+140,128); if(!*rn) strfield(rn,sizeof rn,e+12,128); strfield(unit,sizeof unit,e+268,16); v=f64(e+284); if(!selected(sn,rn) || !isfinite(v)) continue; if(found++) append(","); append("{\"sensor_id\":%u,\"sensor_instance\":%u,\"reading_id\":%u",u32(s),u32(s+4),u32(e+8)); if(metadata) { append(",\"sensor_name\":"); jsonstr(sn); append(",\"reading_name\":"); jsonstr(rn); append(",\"unit\":"); jsonstr(unit); append(",\"reading_type\":%u",u32(e)); } else append(",\"value\":%.17g",v); append("}"); }
- append("]"); free(b); if(!enqueue()) return -1; return found; }
+ append("]"); free(b); if(!enqueue()) { snprintf(source_error,sizeof source_error,"Output record too large or ring buffer full"); return -1; } return found; }
 static BOOL WINAPI control(DWORD code) { if(code==CTRL_C_EVENT||code==CTRL_BREAK_EVENT||code==CTRL_CLOSE_EVENT) { InterlockedExchange(&stopping,1); return TRUE; } return FALSE; }
-int main(int argc,char **argv) { FILE *f; char buf[256]; HANDLE thread; int seen=0,was=0,metadata=0,missing=0; ULONGLONG deadline=0,next=0; if(argc<3) { fprintf(stderr,"usage: hwtrace.exe filter.txt \"ssh command\" [process.exe] [grace_seconds]\n"); return 2; } f=fopen(argv[1],"r"); if(!f) { perror("filter"); return 2; } while(fgets(buf,sizeof buf,f)) { size_t n=strcspn(buf,"\r\n"); buf[n]=0; if(*buf && *buf!='#' && npat<MAXPAT) snprintf(patterns[npat++],sizeof patterns[0],"%.127s",buf); } fclose(f); if(strlen(argv[2])>=sizeof ssh_command) return 2; strcpy(ssh_command,argv[2]); if(argc>3) snprintf(process_name,sizeof process_name,"%s",argv[3]); if(argc>4) grace_ms=(unsigned)(strtoul(argv[4],NULL,10)*1000); snprintf(session,sizeof session,"%08lx-%08lx-%016llx",GetCurrentProcessId(),GetTickCount(),(unsigned long long)time(NULL)); InitializeCriticalSection(&lock); SetConsoleCtrlHandler(control,TRUE); thread=CreateThread(NULL,0,sender,NULL,0,NULL); CloseHandle(CreateThread(NULL,0,keyboard,NULL,0,NULL)); event("collector_start",process_name); fprintf(stderr,"HWTrace started. Ctrl+C stops.\n");
+int main(int argc,char **argv) { FILE *f; char buf[256]; HANDLE thread; int seen=0,was=0,metadata=0,missing=0; ULONGLONG deadline=0,next=0; if(argc==2 && !strcmp(argv[1],"--diagnose")) {
+    size_t bytes=0; unsigned char *b=snapshot(&bytes);
+    if(!b) { fprintf(stderr,"%s\n",source_error); return 1; }
+    printf("HWiNFO shared memory: bytes=%llu magic=%08x version=%u sensors=%u readings=%u\n",(unsigned long long)bytes,u32(b),u32(b+4),u32(b+28),u32(b+40));
+    free(b); return 0;
+} if(argc<3) { fprintf(stderr,"usage: hwtrace.exe filter.txt \"ssh command\" [process.exe] [grace_seconds]\n"); return 2; } f=fopen(argv[1],"r"); if(!f) { perror("filter"); return 2; } while(fgets(buf,sizeof buf,f)) { size_t n=strcspn(buf,"\r\n"); buf[n]=0; if(*buf && *buf!='#' && npat<MAXPAT) snprintf(patterns[npat++],sizeof patterns[0],"%.127s",buf); } fclose(f); if(strlen(argv[2])>=sizeof ssh_command) return 2; strcpy(ssh_command,argv[2]); if(argc>3) snprintf(process_name,sizeof process_name,"%s",argv[3]); if(argc>4) grace_ms=(unsigned)(strtoul(argv[4],NULL,10)*1000); snprintf(session,sizeof session,"%08lx-%08lx-%016llx",GetCurrentProcessId(),GetTickCount(),(unsigned long long)time(NULL)); InitializeCriticalSection(&lock); SetConsoleCtrlHandler(control,TRUE); thread=CreateThread(NULL,0,sender,NULL,0,NULL); CloseHandle(CreateThread(NULL,0,keyboard,NULL,0,NULL)); event("collector_start",process_name); fprintf(stderr,"HWTrace started. Ctrl+C stops.\n");
  while(!stopping) { ULONGLONG now=GetTickCount64(); int running,n; if(now<next) { Sleep((DWORD)(next-now)); continue; } next=now+500; { char msg[1024]; EnterCriticalSection(&lock); strcpy(msg,marker); marker[0]=0; LeaveCriticalSection(&lock); if(*msg) event("marker",msg); } running=is_running(); if(running>=0) { if(running&&!was) { event("process_start",process_name); seen=1; deadline=0; } if(!running&&was) { event("process_exit",process_name); deadline=now+grace_ms; } was=running; if(seen && !running && deadline && now>=deadline) { event("auto_stop",process_name); break; } }
- if(!metadata) { n=read_sensor(1); if(n>=0) { metadata=1; fprintf(stderr,"selected %d readings\n",n); if(missing) event("source_restored","HWiNFO shared memory"); missing=0; } else if(!missing) { event("source_unavailable","HWiNFO shared memory"); missing=1; } } else if(read_sensor(1)<0 || read_sensor(0)<0) { metadata=0; if(!missing) { event("source_unavailable","HWiNFO shared memory or queue full"); missing=1; } } }
+ if(!metadata) { n=read_sensor(1); if(n>=0) { metadata=1; fprintf(stderr,"selected %d readings\n",n); if(missing) event("source_restored","HWiNFO shared memory"); missing=0; } else if(!missing) { event("source_unavailable",source_error); fprintf(stderr,"%s\n",source_error); missing=1; } } else if(read_sensor(1)<0 || read_sensor(0)<0) { metadata=0; if(!missing) { event("source_unavailable",source_error); fprintf(stderr,"%s\n",source_error); missing=1; } } }
  event("collector_stop",""); InterlockedExchange(&stopping,1); if(WaitForSingleObject(thread,5000)==WAIT_TIMEOUT) { fprintf(stderr,"shutdown with pending records; dropped=%u\n",dropped); if(child_running) TerminateProcess(child,1); WaitForSingleObject(thread,2000); } fprintf(stderr,"dropped=%u pending=%u\n",dropped,count); return (dropped || count) ? 1 : 0; }
 

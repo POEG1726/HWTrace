@@ -37,3 +37,5 @@ SQLite tables are `records`, `sensors`, `samples`, and `events`; timestamps are 
 Run receiver tests with `python3 -m unittest discover -s tests -v`. Use `python3 receiver.py --db /path/to/db < stream.jsonl` for one-way ingestion without acknowledgements. Records are version 1 objects containing `session`, uint32 `seq`, `timestamp`, `kind`, and kind-specific `sensors`, `values`, or event fields. Invalid records stop ingestion without an acknowledgement.
 
 The shared memory layout and defensive bounds checks were informed by [sensorwatch](https://github.com/lcjanke2020/sensorwatch) at commit `929e4d879f6276067ac9e95c420d60c3a653fabb`. Its license is reproduced in `SENSORWATCH-LICENSE.txt`.
+
+For read-only acquisition diagnostics, run `.\build\hwtrace.exe --diagnose`. It reports the exact Windows error without opening SSH or starting collection. Live-target investigation details are in `docs/troubleshooting.md`.
