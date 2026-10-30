@@ -22,5 +22,11 @@ if ($graceSeconds -lt 0 -or $graceSeconds -gt 86400) { throw 'grace_seconds must
 . (Join-Path $PSScriptRoot 'Startup-Capture.ps1')
 $context = Initialize-StartupContext -ProcessName $processName -SshCommand ([string]$config.ssh_command)
 Write-Host 'Collection elapsed time starts when the native collector launches (500 ms sampling).'
-& $exe $filter ([string]$config.ssh_command) $processName $graceSeconds $context.Id $context.Event
-exit $LASTEXITCODE
+$collectorExit = 1
+try {
+    & $exe $filter ([string]$config.ssh_command) $processName $graceSeconds $context.Id $context.Event
+    $collectorExit = $LASTEXITCODE
+} finally {
+    if ($context.Worker) { $context.Worker.Dispose() }
+}
+exit $collectorExit

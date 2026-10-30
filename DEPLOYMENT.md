@@ -18,3 +18,5 @@ pwsh -NoProfile -File .\Start-HWTrace.ps1
 The default process is TM5.exe and the post-exit delay is 600 seconds. Enter text followed by Enter for a manual marker. Ctrl+C stops the collector. No scheduled task, service, or startup entry is installed. The collector creates no local telemetry log or database.
 
 The deployed collector.json selects a versioned executable so copying an update cannot replace the active collector. Startup-Capture.ps1 is loaded by Start-HWTrace.ps1. A manual script restart is required to load a changed profile or executable. If TM5 is already present, one startup desktop screenshot is sent to the receiver; otherwise no screenshot is taken. The receiver's image directory is next to its database, under screenshots. No startup task or service is installed.
+
+Fullscreen capture is DPI-aware and asynchronous. Keep the capture/DesktopCapture.cs source alongside Startup-Capture.ps1; PowerShell loads it on demand. The startup screenshot thread waits for the native collector's startup signal and reclaims its own resources when finished. No background job or scheduled task remains after capture/upload.

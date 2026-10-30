@@ -9,6 +9,7 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <wchar.h>
 
 #define QSIZE 128
 #define LINE 65536
@@ -26,7 +27,7 @@ static char source_error[256] = "No snapshot attempted";
 
 static void append(const char *fmt, ...) { va_list a; int n; if (used >= LINE-1) return; va_start(a,fmt); n=vsnprintf(linebuf+used,LINE-used,fmt,a); va_end(a); if(n<0 || (size_t)n>=LINE-used) used=LINE; else used+=(size_t)n; }
 static void jsonstr(const char *s) { const unsigned char *p=(const unsigned char*)s; append("\""); for(;*p;p++) { if(*p=='"'||*p=='\\') append("\\%c",*p); else if(*p<32) append("\\u%04x",*p); else append("%c",*p); } append("\""); }
-static void begin(const char *kind) { SYSTEMTIME t; GetSystemTime(&t); used=0; append("{\"version\":1,\"session\":\"%s\",\"seq\":%u,\"timestamp\":\"%04u-%02u-%02uT%02u:%02u:%02u.%03uZ\",\"kind\":\"%s\"", session,seq++,t.wYear,t.wMonth,t.wDay,t.wHour,t.wMinute,t.wSecond,t.wMilliseconds,kind); append(",\"elapsed_ms\":%llu",(unsigned long long)(GetTickCount64()-collection_start_tick)); }
+static void begin(const char *kind) { SYSTEMTIME t; ULONGLONG tick=GetTickCount64(); GetSystemTime(&t); used=0; append("{\"version\":1,\"session\":\"%s\",\"seq\":%u,\"timestamp\":\"%04u-%02u-%02uT%02u:%02u:%02u.%03uZ\",\"kind\":\"%s\"", session,seq++,t.wYear,t.wMonth,t.wDay,t.wHour,t.wMinute,t.wSecond,t.wMilliseconds,kind); append(",\"elapsed_ms\":%llu,\"uptime_ms\":%llu",(unsigned long long)(tick-collection_start_tick),(unsigned long long)tick); }
 static int enqueue(void) { int ok=0; if(used>=LINE-2) { fprintf(stderr,"record too large\n"); return 0; } append("}\n"); EnterCriticalSection(&lock); if(count<QSIZE) { memcpy(queue[(head+count)%QSIZE],linebuf,used+1); count++; ok=1; } else dropped++; LeaveCriticalSection(&lock); return ok; }
 static void event(const char *name,const char *detail) { begin("event"); append(",\"event\":"); jsonstr(name); append(",\"detail\":"); jsonstr(detail); enqueue(); }
 static int start_ssh(void) {
@@ -90,6 +91,19 @@ static int read_cycle(int with_sample) {
     free(b);
     return result;
 }
+static void signal_capture_start(const char *id) {
+    const wchar_t prefix[]=L"Local\\HWTraceCaptureStart-";
+    wchar_t name[96]; size_t offset=wcslen(prefix);
+    if(strlen(id)!=32) return;
+    memcpy(name,prefix,sizeof prefix);
+    for(size_t i=0;i<32;i++) {
+        if(!((id[i]>='0' && id[i]<='9') || (id[i]>='a' && id[i]<='f'))) return;
+        name[offset+i]=(wchar_t)(unsigned char)id[i];
+    }
+    name[offset+32]=0;
+    HANDLE gate=OpenEventW(EVENT_MODIFY_STATE,FALSE,name);
+    if(gate) { SetEvent(gate); CloseHandle(gate); }
+}
 static BOOL WINAPI control(DWORD code) { if(code==CTRL_C_EVENT||code==CTRL_BREAK_EVENT||code==CTRL_CLOSE_EVENT) { InterlockedExchange(&stopping,1); return TRUE; } return FALSE; }
 int main(int argc,char **argv) { FILE *f; char buf[256]; HANDLE thread; int seen=0,was=0,metadata=0,missing=0; ULONGLONG deadline=0,next=0; collection_start_tick=GetTickCount64(); if(argc>=2 && !strcmp(argv[1],"--diagnose")) {
     size_t bytes=0; unsigned char *b=snapshot(&bytes);
@@ -110,8 +124,8 @@ int main(int argc,char **argv) { FILE *f; char buf[256]; HANDLE thread; int seen
         printf("selected=%d (sensor-qualified rules excluded from this probe)\n",matches);
     }
     free(b); return 0;
-} if(argc<3) { fprintf(stderr,"usage: hwtrace.exe filter.txt \"ssh command\" [process.exe] [grace_seconds]\n"); return 2; } f=fopen(argv[1],"r"); if(!f) { perror("filter"); return 2; } while(fgets(buf,sizeof buf,f)) { size_t n=strcspn(buf,"\r\n"); buf[n]=0; if(*buf && *buf!='#' && npat<MAXPAT) snprintf(patterns[npat++],sizeof patterns[0],"%.127s",buf); } fclose(f); if(strlen(argv[2])>=sizeof ssh_command) return 2; strcpy(ssh_command,argv[2]); if(argc>3) snprintf(process_name,sizeof process_name,"%s",argv[3]); if(argc>4) grace_ms=(unsigned)(strtoul(argv[4],NULL,10)*1000); snprintf(session,sizeof session,"%08lx-%08lx-%016llx",GetCurrentProcessId(),GetTickCount(),(unsigned long long)time(NULL)); InitializeCriticalSection(&lock); SetConsoleCtrlHandler(control,TRUE); thread=CreateThread(NULL,0,sender,NULL,0,NULL); CloseHandle(CreateThread(NULL,0,keyboard,NULL,0,NULL)); event("collector_start",process_name); if(argc>5) event("startup_context",argv[5]); if(argc>6) event(argv[6],argc>5?argv[5]:""); if(is_running()==0) event("process_waiting",process_name); fprintf(stderr,"HWTrace started. Ctrl+C stops.\n");
+} if(argc<3) { fprintf(stderr,"usage: hwtrace.exe filter.txt \"ssh command\" [process.exe] [grace_seconds]\n"); return 2; } f=fopen(argv[1],"r"); if(!f) { perror("filter"); return 2; } while(fgets(buf,sizeof buf,f)) { size_t n=strcspn(buf,"\r\n"); buf[n]=0; if(*buf && *buf!='#' && npat<MAXPAT) snprintf(patterns[npat++],sizeof patterns[0],"%.127s",buf); } fclose(f); if(strlen(argv[2])>=sizeof ssh_command) return 2; strcpy(ssh_command,argv[2]); if(argc>3) snprintf(process_name,sizeof process_name,"%s",argv[3]); if(argc>4) grace_ms=(unsigned)(strtoul(argv[4],NULL,10)*1000); snprintf(session,sizeof session,"%08lx-%08lx-%016llx",GetCurrentProcessId(),GetTickCount(),(unsigned long long)time(NULL)); InitializeCriticalSection(&lock); SetConsoleCtrlHandler(control,TRUE); thread=CreateThread(NULL,0,sender,NULL,0,NULL); CloseHandle(CreateThread(NULL,0,keyboard,NULL,0,NULL)); event("collector_start",process_name); if(argc>5) event("startup_context",argv[5]); if(argc>6) event(argv[6],argc>5?argv[5]:""); if(is_running()==0) event("process_waiting",process_name); fprintf(stderr,"HWTrace started. Ctrl+C stops.\n"); if(argc>5) signal_capture_start(argv[5]);
  while(!stopping) { ULONGLONG now=GetTickCount64(); int running,n; if(now<next) { Sleep((DWORD)(next-now)); continue; } next=now+500; { char msg[1024]; EnterCriticalSection(&lock); strcpy(msg,marker); marker[0]=0; LeaveCriticalSection(&lock); if(*msg) event("marker",msg); } running=is_running(); if(running>=0) { if(running&&!was) { event("process_start",process_name); seen=1; deadline=0; } if(!running&&was) { event("process_exit",process_name); deadline=now+grace_ms; } was=running; if(seen && !running && deadline && now>=deadline) { event("auto_stop",process_name); break; } }
- if(!metadata) { n=read_cycle(0); if(n>=0) { metadata=1; fprintf(stderr,"selected %d readings\n",n); if(missing) event("source_restored","HWiNFO shared memory"); missing=0; } else if(!missing) { event("source_unavailable",source_error); fprintf(stderr,"%s\n",source_error); missing=1; } } else if(read_cycle(1)<0) { metadata=0; if(!missing) { event("source_unavailable",source_error); fprintf(stderr,"%s\n",source_error); missing=1; } } }
+ if(!metadata) { n=read_cycle(1); if(n>=0) { metadata=1; fprintf(stderr,"selected %d readings\n",n); if(missing) event("source_restored","HWiNFO shared memory"); missing=0; } else if(!missing) { event("source_unavailable",source_error); fprintf(stderr,"%s\n",source_error); missing=1; } } else if(read_cycle(1)<0) { metadata=0; if(!missing) { event("source_unavailable",source_error); fprintf(stderr,"%s\n",source_error); missing=1; } } }
  event("collector_stop",""); InterlockedExchange(&stopping,1); if(WaitForSingleObject(thread,5000)==WAIT_TIMEOUT) { fprintf(stderr,"shutdown with pending records; dropped=%u\n",dropped); if(child_running) TerminateProcess(child,1); WaitForSingleObject(thread,2000); } fprintf(stderr,"dropped=%u pending=%u\n",dropped,count); return (dropped || count) ? 1 : 0; }
 

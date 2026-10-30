@@ -37,6 +37,15 @@ CREATE TABLE IF NOT EXISTS record_timing (
   session TEXT NOT NULL, seq INTEGER NOT NULL, elapsed_ms INTEGER NOT NULL,
   PRIMARY KEY(session,seq), FOREIGN KEY(session,seq) REFERENCES records(session,seq)
 );
+CREATE TABLE IF NOT EXISTS record_uptime (
+  session TEXT NOT NULL, seq INTEGER NOT NULL, uptime_ms INTEGER NOT NULL,
+  PRIMARY KEY(session,seq), FOREIGN KEY(session,seq) REFERENCES records(session,seq)
+);
+CREATE TABLE IF NOT EXISTS startup_capture_timing (
+  capture_id TEXT PRIMARY KEY, started_uptime_ms INTEGER NOT NULL,
+  finished_uptime_ms INTEGER NOT NULL, finished_at TEXT NOT NULL,
+  FOREIGN KEY(capture_id) REFERENCES startup_captures(capture_id)
+);
 CREATE TABLE IF NOT EXISTS startup_captures (
   capture_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, source_host TEXT NOT NULL,
   process_name TEXT NOT NULL, path TEXT NOT NULL, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL
@@ -78,6 +87,11 @@ def ingest(db, obj):
             if type(elapsed) is not int or not 0 <= elapsed <= 0x7fffffffffffffff:
                 raise ValueError('invalid elapsed_ms')
             db.execute('INSERT INTO record_timing VALUES (?,?,?)', (session, seq, elapsed))
+        if 'uptime_ms' in obj:
+            uptime = obj['uptime_ms']
+            if type(uptime) is not int or not 0 <= uptime <= 0x7fffffffffffffff:
+                raise ValueError('invalid uptime_ms')
+            db.execute('INSERT INTO record_uptime VALUES (?,?,?)', (session, seq, uptime))
         if kind == 'metadata':
             for item in obj['sensors']:
                 sid, inst, rid = key(item)
@@ -111,10 +125,17 @@ def ingest(db, obj):
 MAX_SCREENSHOT = 32 * 1024 * 1024
 PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
 
-def store_screenshot(db_path, capture_id, timestamp, source_host, process_name, source):
+def store_screenshot(db_path, capture_id, timestamp, source_host, process_name, source, *,
+                     capture_tick_ms=None, capture_finished_tick_ms=None, capture_finished_at=None):
     if not re.fullmatch(r'[0-9a-f]{32}', capture_id):
         raise ValueError('capture_id must be 32 lowercase hex characters')
     timestamp, source_host, process_name = string(timestamp, 64), string(source_host, 256), string(process_name, 256)
+    timed = capture_tick_ms is not None or capture_finished_tick_ms is not None
+    if timed:
+        if (type(capture_tick_ms) is not int or type(capture_finished_tick_ms) is not int
+                or not 0 <= capture_tick_ms <= capture_finished_tick_ms <= 0x7fffffffffffffff):
+            raise ValueError('invalid screenshot uptime interval')
+        capture_finished_at = string(capture_finished_at, 64)
     data = source.read(MAX_SCREENSHOT + 1)
     if len(data) > MAX_SCREENSHOT or len(data) < 33 or not data.startswith(PNG_SIGNATURE) or data[12:16] != b'IHDR':
         raise ValueError('invalid or oversized PNG')
@@ -144,6 +165,9 @@ def store_screenshot(db_path, capture_id, timestamp, source_host, process_name, 
         with db:
             db.execute('INSERT INTO startup_captures VALUES (?,?,?,?,?,?,?)',
                        (capture_id, timestamp, source_host, process_name, str(dest), digest, len(data)))
+            if timed:
+                db.execute('INSERT INTO startup_capture_timing VALUES (?,?,?,?)',
+                           (capture_id, capture_tick_ms, capture_finished_tick_ms, capture_finished_at))
         return dest
     finally:
         db.close()
@@ -157,6 +181,9 @@ def main():
     p.add_argument('--ack', action='store_true', help='acknowledge each committed record on stdout')
     p.add_argument('--startup-screenshot', metavar='CAPTURE_ID')
     p.add_argument('--captured-at')
+    p.add_argument('--capture-finished-at')
+    p.add_argument('--capture-tick-ms', type=int)
+    p.add_argument('--capture-finished-tick-ms', type=int)
     p.add_argument('--source-host')
     p.add_argument('--process-name-b64')
     args = p.parse_args()
@@ -164,7 +191,10 @@ def main():
         try:
             name = base64.b64decode(args.process_name_b64 or '', validate=True).decode('utf-8')
             store_screenshot(args.db, args.startup_screenshot, args.captured_at,
-                             args.source_host, name, sys.stdin.buffer)
+                             args.source_host, name, sys.stdin.buffer,
+                             capture_tick_ms=args.capture_tick_ms,
+                             capture_finished_tick_ms=args.capture_finished_tick_ms,
+                             capture_finished_at=args.capture_finished_at)
             sys.stdout.buffer.write(('STORED ' + args.startup_screenshot + '\n').encode('ascii'))
             sys.stdout.buffer.flush()
             return 0
