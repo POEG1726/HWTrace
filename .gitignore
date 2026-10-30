@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.exe
+*.obj
+*.pdb
+*.db
+*.db-*
+*.sqlite*
+*.log
+build/
+target/
+.env
