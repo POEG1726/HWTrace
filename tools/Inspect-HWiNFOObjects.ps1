@@ -16,7 +16,7 @@ public class ObjectDirectories {
   try { var us=new US{Length=(ushort)(path.Length*2),Max=(ushort)(path.Length*2+2),Buffer=txt}; Marshal.StructureToPtr(us,up,false);
    var oa=new OA{Length=Marshal.SizeOf<OA>(),Name=up,Attributes=64}; int st=NtOpenDirectoryObject(out h,1,ref oa); if(st<0) return new[]{"OPEN_STATUS="+st.ToString("X8")};
    uint ctx=0,ret; bool first=true;
-   while((st=NtQueryDirectoryObject(h,buf,65536,true,first,ref ctx,out ret))>=0) { first=false; var e=Marshal.PtrToStructure<ENTRY>(buf); string name=Marshal.PtrToStringUni(e.Name.Buffer,e.Name.Length/2); string type=Marshal.PtrToStringUni(e.Type.Buffer,e.Type.Length/2); if(name.IndexOf("hwinfo",StringComparison.OrdinalIgnoreCase)>=0 || name.IndexOf("sens",StringComparison.OrdinalIgnoreCase)>=0) result.Add(type+" "+name); }
+   while((st=NtQueryDirectoryObject(h,buf,65536,true,first,ref ctx,out ret))>=0) { first=false; var e=Marshal.PtrToStructure<ENTRY>(buf); string name=Marshal.PtrToStringUni(e.Name.Buffer,e.Name.Length/2); string type=Marshal.PtrToStringUni(e.Type.Buffer,e.Type.Length/2); if(name.IndexOf("hwinfo",StringComparison.OrdinalIgnoreCase)>=0 || name.IndexOf("sens_sm",StringComparison.OrdinalIgnoreCase)>=0) result.Add(type+" "+name); }
    result.Add("END_STATUS="+st.ToString("X8")); return result.ToArray();
   } finally { if(h!=IntPtr.Zero) NtClose(h); Marshal.FreeHGlobal(buf); Marshal.FreeHGlobal(up); Marshal.FreeHGlobal(txt); }
  }

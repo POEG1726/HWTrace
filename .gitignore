@@ -1,21 +1,42 @@
+# Build outputs and developer environments
+build/
+target/
+.venv/
 __pycache__/
 *.py[cod]
 *.exe
+*.dll
 *.obj
+*.o
 *.pdb
+*.bundle
+*.zip
+*.tar
+
+# Runtime data and local configuration
+data/
+screenshots/
 *.db
 *.db-*
 *.sqlite*
 *.log
-build/
-target/
+*.csv
+collector.json
+collector.*.local.json
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+authorized_keys
+known_hosts
+DEPLOYMENT.json
 
-example.csv
+# Private operational notes and pre-publication backups
+local-private/
+.planning/
 task_plan.md
 findings.md
 progress.md
-collector.json
-
-data/
-screenshots/

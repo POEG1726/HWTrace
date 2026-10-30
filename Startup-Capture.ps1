@@ -7,7 +7,15 @@ function Get-MonitoredProcessPresent {
 function Import-DesktopCapture {
     if (-not ('HWTraceDesktopCapture' -as [type])) {
         Add-Type -AssemblyName System.Drawing.Common
-        $references = @([Drawing.Bitmap].Assembly.Location, [Drawing.Rectangle].Assembly.Location, [Diagnostics.Process].Assembly.Location, (Join-Path $PSHOME 'ref/System.Threading.Thread.dll'), (Join-Path $PSHOME 'ref/System.Threading.dll'), (Join-Path $PSHOME 'ref/System.Console.dll'), (Join-Path $PSHOME 'ref/System.Threading.Tasks.dll'), [ComponentModel.Component].Assembly.Location)
+        $references = @(
+            [Drawing.Bitmap].Assembly.Location,
+            [Drawing.Rectangle].Assembly.Location,
+            [Diagnostics.Process].Assembly.Location,
+            [ComponentModel.Component].Assembly.Location
+        )
+        foreach ($name in @('System.Threading.Thread', 'System.Threading', 'System.Console', 'System.Threading.Tasks')) {
+            $references += Join-Path $PSHOME "ref/$name.dll"
+        }
         $references += @([Drawing.Bitmap].Assembly.GetReferencedAssemblies() | Where-Object { $_.Name -like 'System.Private.Windows*' } | ForEach-Object { [Reflection.Assembly]::Load($_).Location })
         Add-Type -Path (Join-Path $PSScriptRoot 'capture/DesktopCapture.cs') -ReferencedAssemblies $references -ErrorAction Stop
     }

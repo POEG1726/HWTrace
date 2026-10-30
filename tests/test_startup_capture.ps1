@@ -78,16 +78,20 @@ public static class HWTraceTestGdi {
         $cancelWorker.Cancel()
         if (-not $cancelWorker.Wait(10000)) { throw 'Cancelled worker did not release its thread.' }
     } finally { $cancelWorker.Dispose() }
-    # DPI regression: physical bounds must be independent of an unaware calling thread.
-    $physical = [HWTraceDesktopCapture]::GetPhysicalBounds()
-    $before = [HWTraceDesktopCapture]::GetThreadDpiAwarenessContext()
-    $setter = [HWTraceDesktopCapture].GetMethod('SetThreadDpiAwarenessContext', [Reflection.BindingFlags]'NonPublic,Static')
-    try {
-        $null = $setter.Invoke($null, @([IntPtr]::new(-1)))
-        $underScaling = [HWTraceDesktopCapture]::GetPhysicalBounds()
-        if ($physical -ne $underScaling) { throw 'Physical monitor bounds changed under DPI virtualization.' }
-        if (-not [HWTraceDesktopCapture]::AreDpiAwarenessContextsEqual([HWTraceDesktopCapture]::GetThreadDpiAwarenessContext(),[IntPtr]::new(-1))) { throw 'Capture did not restore calling-thread DPI context.' }
-    } finally { $null = $setter.Invoke($null, @($before)) }
+    if ([Environment]::UserInteractive -and [Diagnostics.Process]::GetCurrentProcess().SessionId -ne 0) {
+        # DPI regression: physical bounds must be independent of an unaware calling thread.
+        $physical = [HWTraceDesktopCapture]::GetPhysicalBounds()
+        $before = [HWTraceDesktopCapture]::GetThreadDpiAwarenessContext()
+        $setter = [HWTraceDesktopCapture].GetMethod('SetThreadDpiAwarenessContext', [Reflection.BindingFlags]'NonPublic,Static')
+        try {
+            $null = $setter.Invoke($null, @([IntPtr]::new(-1)))
+            $underScaling = [HWTraceDesktopCapture]::GetPhysicalBounds()
+            if ($physical -ne $underScaling) { throw 'Physical monitor bounds changed under DPI virtualization.' }
+            if (-not [HWTraceDesktopCapture]::AreDpiAwarenessContextsEqual([HWTraceDesktopCapture]::GetThreadDpiAwarenessContext(),[IntPtr]::new(-1))) { throw 'Capture did not restore calling-thread DPI context.' }
+        } finally { $null = $setter.Invoke($null, @($before)) }
+    } else {
+        Write-Host 'SKIP physical monitor geometry: noninteractive/headless session.'
+    }
     $script:already = $false; $script:workers = 0
     function Get-MonitoredProcessPresent { param($ProcessName); return $script:already }
     function Start-BackgroundStartupScreenshot { param($SshCommand,$ProcessName,$CaptureId); $script:workers++; return [object]::new() }

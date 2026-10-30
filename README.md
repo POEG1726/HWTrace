@@ -1,56 +1,168 @@
 # HWTrace
 
-A Windows native HWiNFO collector streams JSON Lines over a Windows-initiated SSH process to a Python 3 Linux receiver. The receiver stores readings, metadata and events in SQLite (WAL). The collector writes no local telemetry files.
+Hardware telemetry and event logging over SSH. A native Windows collector reads
+HWiNFO Shared Memory every **500 ms** and streams JSONL to a Python receiver on
+**Linux, WSL or Windows**. The receiver stores sensor metadata, samples and events
+in SQLite with WAL enabled.
+
+The collector keeps telemetry in a bounded RAM queue: it writes no local database,
+telemetry log or screenshot file. The receiver is an SSH command, not a web service.
+
+> **Desktop capture:** the PowerShell launcher takes one full-desktop screenshot
+> when the monitored process is already running. This includes all active monitors
+> and can include other applications. Images are transferred to the configured
+> receiver. Run the native executable directly if you do not want screenshots.
+
+## What it does
+
+- Select readings by configurable names; identify duplicates by HWiNFO sensor ID,
+  sensor instance and reading ID, rather than display name alone.
+- Store reading names, units, UTC timestamps and monotonic collection timing.
+- Record process presence/exit and manual markers. Default process: `TM5.exe`.
+- Continue for 10 minutes after the last monitored process exits; cancel the stop
+  if it restarts. Never auto-stop before observing the process.
+- Reconnect SSH and retry unacknowledged records; deduplicate retries in SQLite.
+- Capture the physical-pixel desktop on a background thread, released by the
+  collector's startup signal. Record the actual capture interval for alignment.
+
+```text
+Windows collector                         Linux / WSL / Windows receiver
+HWiNFO Shared Memory -> native collector -- persistent SSH / JSONL --> SQLite
+                       startup screenshot -- one-off SSH / PNG -----> screenshots/
+```
+
+## Requirements
+
+Collector: Windows x64, HWiNFO running in Sensors mode with Shared Memory Support
+and a **500 ms** polling interval, plus Windows OpenSSH Client. The optional
+screenshot launcher needs PowerShell 7; PowerShell 7.6 was tested. Its screenshot
+API requires Windows 10 1703 or later and an interactive desktop.
+
+Receiver: Python **3.12+**, an SSH server, and a writable local directory. No Python
+packages are required. Use the Linux filesystem for a WSL database.
+
+Build: MinGW-w64 GCC, either on Windows or as a WSL cross compiler. No HWiNFO SDK
+or third-party native library is needed.
 
 ## Build
 
-Windows: install a C compiler such as MinGW-w64, then run:
+From the repository root, with a Windows MinGW compiler on PATH:
 
 ```powershell
-New-Item -ItemType Directory -Force build
+pwsh -NoProfile -File .\scripts\build.ps1 -Compiler gcc
+```
+
+Or cross-build using WSL:
+
+```sh
+sudo apt-get install gcc-mingw-w64-x86-64
+```
+
+```powershell
+pwsh -NoProfile -File .\scripts\build.ps1 -UseWsl
+```
+
+The executable is `build/hwtrace.exe`. A direct compiler invocation also works:
+
+```sh
 x86_64-w64-mingw32-gcc -std=c11 -O2 -Wall -Wextra collector.c -o build/hwtrace.exe
 ```
 
-Cross-build from WSL with `sudo apt install gcc-mingw-w64-x86-64` and run the same compiler command from the project directory. Build outputs are ignored by Git.
+Create `build/` before using the direct command.
 
-## Prepare and run
+## Configure and run
 
-1. In HWiNFO, enable Shared Memory Support, open Sensors, and set its polling interval to 500 ms. Keep HWiNFO running. Some editions disable shared memory after a limited time.
-2. Copy `receiver.py` to the Linux receiver. Prepare SSH key authentication and verify the host key with the usual OpenSSH tools. Ensure the Linux account can create and write the selected database directory. Use a local Linux filesystem for the database (particularly when using WSL).
-3. Verify the SSH command independently, substituting your host, key and paths. The SSH connection must be noninteractive and stdout must be reserved for receiver acknowledgements:
+1. Copy `receiver.py` to the receiver and create its database directory.
+2. Configure SSH key authentication **from the collector to the receiver**. Verify
+   the server host key and confirm a noninteractive login works. An SSH key for
+   the opposite direction does not configure this connection.
+3. Copy `collector.example.json` to `collector.json`. Replace the SSH destination
+   and receiver paths with your own. Keep credentials outside the repository.
+4. Start HWiNFO Sensors, enable Shared Memory Support, and set polling to 500 ms.
+5. On the collector's logged-in Windows desktop:
 
 ```powershell
-$remote = 'ssh.exe -i C:/Users/you/.ssh/id_ed25519 -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 user@host python3 /home/user/hwtrace/receiver.py --db /home/user/hwtrace/data.sqlite3 --ack'
-.\build\hwtrace.exe .\ddr5.filter $remote
+pwsh -NoProfile -File .\Start-HWTrace.ps1
 ```
 
-Enter a line and press Enter to record a manual marker. Ctrl+C requests shutdown. The default monitored executable is `TM5.exe`; pass a different executable name as the third argument. A fourth argument changes the post-exit grace period in seconds (default 600), useful for testing. A running instance at collector startup is detected as a start. Process checks are every 500 ms; very short processes can be missed. After the process exits, a restart cancels the pending stop. No automatic stop occurs until the process has been observed at least once.
+Type a line and press Enter for a manual marker. Press Ctrl+C to stop. The launcher
+checks for the monitored process but does **not** launch TM5 or another stress tool.
+When that process is absent, it skips screenshots and starts collection normally.
 
-`ddr5.filter` contains case-insensitive reading-name substrings based on the provided CSV. `sensor substring|reading substring` restricts both fields. Empty filter files select all readings. This is selection, not a fixed list of supported hardware. IDs and names in the database can be inspected to refine the filter. Actual availability depends on HWiNFO and hardware; the laptop used for testing does not expose the DDR5 DIMM readings from the supplied CSV. HWiNFO IDs distinguish duplicate names within a session; verify identities again after hardware or HWiNFO changes.
+For telemetry without screenshots, use the native collector directly:
 
-## Reliability and storage
+```powershell
+$config = Get-Content .\collector.json -Raw | ConvertFrom-Json
+.\build\hwtrace.exe .\ddr5.filter $config.ssh_command TM5.exe 600
+```
 
-A 128-record fixed RAM ring decouples polling from SSH. The receiver commits each record before acknowledging it; the collector retries the oldest unacknowledged record after reconnect, and session/sequence deduplication prevents an acknowledged-or-not retry from duplicating it. Sensor metadata precedes samples, and is refreshed during sampling. The SSH command must include `--ack`. No local spool exists: a long outage can fill the queue, after which new records are dropped. The drop count appears on stderr; shutdown waits up to five seconds for queued records and exits nonzero if records remain or were dropped. Events can also be lost on overflow. A crash or power loss can lose unacknowledged in-memory records. SSH host-key checking and authentication are managed by OpenSSH; do not disable verification in production.
+[Deployment instructions](docs/deployment.md) include Linux/WSL and Windows
+receiver examples. Neither a database nor a screenshot viewer needs to be started
+manually: SSH invokes the receiver as needed.
 
-SQLite tables are `records`, `sensors`, `samples`, and `events`; timestamps are UTC ISO 8601. Sensor identity is `(session, sensor_id, sensor_instance, reading_id)`. Units and display names are stored in `sensors`. A metadata update replaces that identity's previous displayed metadata within the session; it is not a historical metadata table. SQLite and the collector do not assert that HWiNFO itself refreshed a value at every sample.
+## Sensor profiles
 
-Run receiver tests with `python3 -m unittest discover -s tests -v`. Use `python3 receiver.py --db /path/to/db < stream.jsonl` for one-way ingestion without acknowledgements. Records are version 1 objects containing `session`, uint32 `seq`, `timestamp`, `kind`, and kind-specific `sensors`, `values`, or event fields. Invalid records stop ingestion without an acknowledgement.
+`ddr5.filter` is an initial memory-stability profile, not a hardware limitation.
+Each non-comment line is a case-insensitive reading-name substring, or
+`sensor-group substring|reading substring`. An empty right-hand substring selects
+all readings in the matching group; an empty file selects all readings.
 
-The shared memory layout and defensive bounds checks were informed by [sensorwatch](https://github.com/lcjanke2020/sensorwatch) at commit `929e4d879f6276067ac9e95c420d60c3a653fabb`. Its license is reproduced in `SENSORWATCH-LICENSE.txt`.
+The profile covers CPU/die/CCD/core/L3/IO-die and VRM temperatures; SoC/VDDIO
+voltages; DRAM bandwidth; MCLK/FCLK/UCLK and exposed memory timings; per-DIMM SPD
+temperature, VDD/VDDQ/VPP, VIN/VOUT rails, power and PMIC flags; memory pressure and
+WHEA counts. Actual availability depends on HWiNFO and hardware. It stores
+individual core/L3 readings rather than inventing CSV aggregate averages.
 
-For read-only acquisition diagnostics, run `.\build\hwtrace.exe --diagnose`. It reports the exact Windows error without opening SSH or starting collection. Live-target investigation details are in `docs/troubleshooting.md`.
+Profiles are loaded at startup. Restart the collector to apply a change. Names
+can be localized or customized; inspect HWiNFO or stored metadata when refining
+rules. Stable IDs distinguish duplicates within a session, but verify them again
+after hardware or HWiNFO changes.
 
-Native regression fixtures can be built with the same MinGW compiler: `tests/test_native_units.c` and `tests/test_native_snapshot.c`. The latter emits JSONL exercising metadata for initially non-finite readings followed by a valid sample; feed it through the receiver to verify foreign-key-safe ingestion.
+## Storage, timing and limits
 
+The database contains `records`, `sensors`, `samples`, `events`, `record_timing`,
+`record_uptime`, `startup_captures` and `startup_capture_timing`. PNGs are saved
+beside it in `screenshots/`. [Protocol and schema](docs/protocol.md) explain joins
+and capture-to-sample alignment.
 
-## Startup context and desktop screenshot
+- The RAM ring has 128 slots of 64 KiB. A record must fit in one slot. Snapshot and
+  screenshot memory are additional; footprint depends on the selected hardware.
+- A full ring drops new records, including events. Shutdown allows five seconds
+  to drain and returns nonzero for pending/dropped records. There is no disk spool.
+- A receiver acknowledgement follows the SQLite commit. This supports reconnect
+  retries; it does not make crashes or extended outages lossless.
+- Process presence is checked every 500 ms and aggregated by executable name.
+  Brief processes can be missed. A start event for an already-running process is
+  a detection timestamp, not its original start time.
+- Capture/upload is asynchronous. Pixel-copy start/end UTC and boot-time clocks
+  align it to samples; this is not an atomic or hard-real-time screenshot.
+- HWiNFO may stop publishing shared memory independently of the collector. The
+  collector retries; it cannot recover samples that HWiNFO never exposed.
 
-Start with PowerShell 7 on the tested machine's logged-in desktop: `pwsh -NoProfile -File .\Start-HWTrace.ps1`. The launcher checks the configured process before the native collector starts. If it is already running, the launcher starts a background screenshot/upload thread, then immediately launches the native collector. A named startup event releases the screenshot thread when the collector is initialized, before the first sample. Pixel capture and PNG upload never block the sampling loop. The image covers all active monitors at physical-pixel resolution, independent of DPI scaling and negative monitor origins. Only the capture thread temporarily changes its DPI context; it restores it afterwards. It does not save an image or telemetry log on the tested machine. The receiver stores it beside the database in `screenshots/<capture-id>.png`, with timestamp, source host, process name and SHA-256 in `startup_captures`. A `startup_context` event and `startup_screenshot_pending` event associate the capture ID with the telemetry session; a row in `startup_captures` confirms upload completion. The worker releases bitmap/graphics/stream resources and its PNG buffer after completion and exits. On collector shutdown, the launcher joins/cancels any unfinished worker and kills only that worker's own SSH upload process. No screenshot is taken when the monitored process is absent. Worker startup failure produces a failure event; later capture/upload failure is reported on stderr while telemetry continues. A pending event alone does not mean an upload succeeded. Running from a noninteractive SSH session does not provide a usable desktop; launch interactively for this feature.
+## Test and troubleshoot
 
-The native collector starts a monotonic elapsed clock when it launches. `record_timing` stores `elapsed_ms` keyed by session/sequence; existing `records` timestamps remain UTC. This is collection elapsed time, not a reconstruction of TM5 elapsed time when TM5 was already running. The startup screenshot preserves the displayed context for that case. Its timestamp is the actual pixel-copy start; `startup_capture_timing` stores the pixel-copy finish UTC and start/finish system uptimes. Telemetry stores the same boot-time clock in `record_uptime`, so samples can be aligned to the capture interval instead of upload completion. The capture is not an atomic instantaneous view; scheduling and pixel-copy time remain measurable offsets. If TM5 is absent, collection and timing begin normally; the collector still waits to observe TM5 before any post-exit auto-stop can occur.
+```powershell
+pwsh -NoProfile -File .\scripts\test.ps1 -UseWsl
+```
 
-The expanded DDR5 profile includes all exposed Memory Timings, MCLK/FCLK/UCLK, CPU package/die/CCD/core/L3/IO-die temperatures, memory-related voltages, three CPU VRM temperatures, DRAM bandwidth, DIMM SPD/PMIC/auxiliary rails and per-DIMM power. Core and L3 readings are stored individually; CSV-only aggregate averages are not invented. Only timings exposed by HWiNFO are available.
+For a Windows compiler, use `-Compiler gcc` instead of `-UseWsl`. Tests use synthetic
+readings/images and offscreen bitmaps; they do not capture your desktop, launch
+stress tools or require HWiNFO. Python-only receiver tests also run on Linux:
 
-Run `pwsh -NoProfile -File tests/test_startup_capture.ps1` to test binary upload with a synthetic PNG and both process-presence branches without capturing a desktop. Python unit tests cover screenshot storage and monotonic-time ingestion. The receiver uses a one-off SSH upload for the startup screenshot and a persistent SSH connection for telemetry.
+```sh
+python3 -m unittest discover -s tests -v
+```
 
-The fullscreen capture implementation is `capture/DesktopCapture.cs`. No fixed screenshot dimensions are used. The PowerShell test forces a DPI-unaware calling context, verifies unchanged physical monitor bounds and restored DPI context, checks the managed/native startup signal, and delays a synthetic upload to verify concurrent native execution. It does not capture a desktop during tests.
+Read-only shared-memory diagnostics:
+
+```powershell
+.\build\hwtrace.exe --diagnose
+```
+
+See [troubleshooting](docs/troubleshooting.md), [validation coverage](docs/validation.md)
+and [contributing](CONTRIBUTING.md).
+
+## License
+
+[MIT](LICENSE). Upstream acknowledgements and preserved license text are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
