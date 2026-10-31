@@ -73,3 +73,18 @@ desktop or failed image upload does not stop telemetry; inspect stderr.
 No task, service, remote repository or startup entry is installed by the scripts.
 Screenshots remain on the receiver until removed. Stop receiver writers before
 deleting a database or its WAL/SHM files.
+
+## Optional dashboard on the receiver
+
+The SSH receiver needs no persistent HTTP server. For a browser view, also copy
+`dashboard.py` and `web/` to the receiver (or use a full checkout), then run:
+
+```sh
+python dashboard.py --db /path/to/hwtrace.sqlite3 --open-browser
+```
+
+On Windows, `Open-Dashboard.cmd` opens `data/hwtrace.sqlite3` from the project
+directory. The dashboard is a separate process; restarting it does not restart
+collection. Its default address is `http://127.0.0.1:8765/`. Keep the listener on
+loopback and use an SSH tunnel for remote viewing. See the
+[dashboard guide](dashboard.md) for controls, file requirements and limitations.

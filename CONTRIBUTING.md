@@ -12,6 +12,10 @@ pwsh -NoProfile -File .\scripts\test.ps1 -Compiler gcc
 ```
 
 Python-only checks: `python -m unittest discover -s tests -v`.
+Dashboard interaction checks: `node tests/test_dashboard_ui.js`. Node.js 18+ is
+required for the full test script; it is not needed to run the dashboard. No npm
+install or browser framework is needed. Keep dashboard HTTP access read-only and
+use synthetic databases in tests.
 C/C# formatting follows `.clang-format`; Python follows Black defaults. PowerShell
 uses four-space indentation. Formatters are optional developer tools, not runtime
 dependencies.

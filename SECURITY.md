@@ -19,3 +19,8 @@ contact address is embedded in this distribution.
 The receiver is intended for a trusted SSH-authenticated collector, not anonymous
 network input. It validates bounds and PNG headers but does not sandbox arbitrary
 shell commands or fully decode/inspect PNG content.
+
+The optional dashboard exposes read-only telemetry through an unauthenticated
+HTTP server bound to loopback by default. It supplies no TLS or access control.
+Keep it local or use an SSH tunnel; database read-only access does not make its
+contents public-safe. Do not bind it to an untrusted network.

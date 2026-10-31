@@ -1,5 +1,25 @@
 # Troubleshooting
 
+## Dashboard
+
+- **Database not found/unable to open:** start collection to create a database,
+  then pass its actual path with `--db`. `Open-Dashboard.cmd` always uses
+  `data/hwtrace.sqlite3` beside the script. Check database and WAL/SHM permissions.
+- **Port already in use:** another dashboard may be running. Reuse its page or
+  start with `--port 8766`; closing a browser tab does not stop the Python server.
+- **Page opens but charts are empty:** select sensor checkboxes in the desired
+  session. Double-click to undo a zoom into an empty interval. Check the terminal
+  for HTTP errors and confirm `web/` was copied alongside `dashboard.py`.
+- **Peak missing:** plots are downsampled and averaging can hide transients.
+  Use average 1 and zoom into a shorter range. Legend extrema include points
+  omitted from the curve; averaged extrema describe groups, not raw samples.
+- **Not updating:** only the latest session refreshes periodically. Check its
+  last-record timestamp and the collector/SSH separately; the dashboard does not
+  reconnect or control collection. A stale record is not an HTTP-server failure.
+
+See [dashboard usage and access](dashboard.md). Do not expose its unauthenticated
+HTTP listener to an untrusted network.
+
 ## No telemetry
 
 Verify SSH independently with key authentication, `BatchMode=yes` and host-key

@@ -75,3 +75,7 @@ To align data, compare `record_uptime.uptime_ms` with the capture's
 `started_uptime_ms` and `finished_uptime_ms`. These clocks originate on the same
 collector. Use the pixel-copy interval rather than upload completion. A screenshot
 is copied over an interval, not atomically sampled.
+
+The optional dashboard reads these tables through separate HTTP queries; it does
+not participate in SSH acknowledgements or ingestion. Its endpoints and plot
+semantics are documented in the [dashboard guide](dashboard.md).

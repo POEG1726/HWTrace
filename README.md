@@ -6,7 +6,8 @@ HWiNFO Shared Memory every **500 ms** and streams JSONL to a Python receiver on
 in SQLite with WAL enabled.
 
 The collector keeps telemetry in a bounded RAM queue: it writes no local database,
-telemetry log or screenshot file. The receiver is an SSH command, not a web service.
+telemetry log or screenshot file. SSH invokes the receiver as a command. An optional
+read-only web dashboard visualizes the stored data separately.
 
 > **Desktop capture:** the PowerShell launcher takes one full-desktop screenshot
 > when the monitored process is already running. This includes all active monitors
@@ -97,8 +98,8 @@ $config = Get-Content .\collector.json -Raw | ConvertFrom-Json
 ```
 
 [Deployment instructions](docs/deployment.md) include Linux/WSL and Windows
-receiver examples. Neither a database nor a screenshot viewer needs to be started
-manually: SSH invokes the receiver as needed.
+receiver examples. SSH invokes the receiver as needed; the optional dashboard
+is started separately.
 
 ## Sensor profiles
 
@@ -145,7 +146,9 @@ and capture-to-sample alignment.
 pwsh -NoProfile -File .\scripts\test.ps1 -UseWsl
 ```
 
-For a Windows compiler, use `-Compiler gcc` instead of `-UseWsl`. Tests use synthetic
+For a Windows compiler, use `-Compiler gcc` instead of `-UseWsl`. Dashboard
+interaction tests also require Node.js 18+ (development only, no npm packages).
+Tests use synthetic
 readings/images and offscreen bitmaps; they do not capture your desktop, launch
 stress tools or require HWiNFO. Python-only receiver tests also run on Linux:
 
@@ -161,6 +164,32 @@ Read-only shared-memory diagnostics:
 
 See [troubleshooting](docs/troubleshooting.md), [validation coverage](docs/validation.md)
 and [contributing](CONTRIBUTING.md).
+
+## Web dashboard
+
+On the receiver, run the dashboard against an existing database:
+
+```sh
+python dashboard.py --db /path/to/hwtrace.sqlite3 --open-browser
+```
+
+On Windows, double-click `Open-Dashboard.cmd` to use `data/hwtrace.sqlite3`.
+Keep its command window open; close it to stop the dashboard. Python 3.12+ is
+required; Node.js is only needed for developer tests.
+
+Open `http://127.0.0.1:8765/`. The interface currently uses Chinese labels and
+browser-local time. It shows the latest collector session with five-second
+refreshes and lets you select older sessions. Search and select up to 50 sensors
+per panel, grouped into charts by unit. Hover for plotted values and timestamps;
+drag to zoom, scroll to pan and double-click to go back one zoom level. Each chart
+supports sample-group averages and temperature sensors have editable visual
+thresholds. Legends show stable IDs and extrema for the current range.
+
+The dashboard reads SQLite without changing telemetry or controlling collection.
+It has no login and listens on localhost by default. Long results are downsampled;
+averages and plots can hide brief peaks. The last-record timestamp is a freshness
+indicator, not proof of an active SSH connection. See the [dashboard guide](docs/dashboard.md)
+for controls, interpretation, remote access and HTTP endpoints.
 
 ## License
 
