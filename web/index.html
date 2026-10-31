@@ -1,0 +1,6 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HWTrace | 数据查看器</title><link rel="stylesheet" href="/style.css"></head><body>
+<header><div class="brand"><span class="mark">∿</span><span>HWTrace <small>数据查看器</small></span></div><div id="status">正在连接数据库…</div></header>
+<main><div class="intro"><div><h1>遥测记录</h1><p>浏览采集过程，比较传感器随时间的变化。</p></div><div class="view-options">时间显示为浏览器本地时区</div></div>
+<section><div class="section-heading"><div><span class="eyebrow">持续更新</span><h2>最新 session</h2><p id="live-meta">正在读取…</p></div><span class="live-indicator"><i></i> 每 5 秒刷新</span></div><div id="live"></div></section>
+<section><div class="section-heading"><div><span class="eyebrow">记录档案</span><h2>过往 session</h2><p>选择一段采集记录，查看对应的传感器。</p></div><label class="session-select">选择记录 <select id="history-select"><option>正在读取…</option></select></label></div><div id="history"></div></section>
+<footer>图表按单位分别显示；长记录为抽样显示，悬停显示所绘制的采样值或分组平均值。现有 session 对应采集器运行周期，SSH 重连不会产生新 session；数据库不记录连接边界。</footer></main><script src="/app.js"></script></body></html>
