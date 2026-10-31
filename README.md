@@ -1,13 +1,51 @@
 # HWTrace
 
-Hardware telemetry and event logging over SSH. A native Windows collector reads
-HWiNFO Shared Memory every **500 ms** and streams JSONL to a Python receiver on
-**Linux, WSL or Windows**. The receiver stores sensor metadata, samples and events
-in SQLite with WAL enabled.
+**Record DIMM temperatures, memory voltages and test events. Review the run in a browser.**
 
-The collector keeps telemetry in a bounded RAM queue: it writes no local database,
-telemetry log or screenshot file. SSH invokes the receiver as a command. An optional
-read-only web dashboard visualizes the stored data separately.
+English | [简体中文](README.zh-CN.md)
+
+[![Download Windows x64](https://img.shields.io/badge/Download-Windows_x64_v0.1.0-168d81?style=for-the-badge&logo=windows)](https://github.com/POEG1726/HWTrace/releases/download/v0.1.0/HWTrace-v0.1.0-windows-x64.zip)
+[All releases](https://github.com/POEG1726/HWTrace/releases/latest) ·
+[Setup guide](docs/deployment.md) · [Dashboard guide](docs/dashboard.md)
+
+Running a long DDR5/TM5 test? HWTrace records the thermal and voltage changes
+throughout the run, marks process start/exit and lets you compare sensors later.
+Start with the included DDR5 profile or select other readings exposed by HWiNFO
+for CPU, GPU and other hardware monitoring.
+
+![HWTrace dashboard showing recorded SPD hub temperatures from four DDR5 DIMMs](docs/assets/dashboard.png)
+
+*Actual SPD hub temperatures recorded from four DDR5 DIMMs. The dashboard supports
+sensor selection, zoom/pan, hover values and per-sensor temperature guides.*
+
+## Get started
+
+1. **Download and extract the Windows x64 package above.** It includes the built
+   collector, launcher, receiver and dashboard; no compiler is required.
+2. **Set up a receiver** on Linux, WSL or Windows with Python 3.12+ and SSH key
+   authentication from the collector. Follow the [setup guide](docs/deployment.md).
+3. **Configure the collector:** copy `collector.example.json` to `collector.json`
+   and set your receiver command. Start HWiNFO Sensors with Shared Memory Support
+   and a **500 ms** polling interval, then run in PowerShell 7:
+
+   ```powershell
+   pwsh -NoProfile -File .\Start-HWTrace.ps1
+   ```
+
+4. **View your data** on the receiver:
+
+   ```sh
+   python dashboard.py --db /path/to/hwtrace.sqlite3 --open-browser
+   ```
+
+   On Windows, `Open-Dashboard.cmd` uses `data/hwtrace.sqlite3` in the project
+   directory. The database is created when the receiver first ingests telemetry.
+
+The native Windows collector samples HWiNFO Shared Memory every **500 ms** and
+streams JSONL over persistent SSH. The receiver stores metadata, samples and
+events in SQLite WAL. The collector keeps a bounded RAM queue and writes no local
+telemetry database, log or screenshot file. The dashboard is an optional,
+read-only process on the receiver.
 
 > **Desktop capture:** the PowerShell launcher takes one full-desktop screenshot
 > when the monitored process is already running. This includes all active monitors
@@ -44,32 +82,6 @@ packages are required. Use the Linux filesystem for a WSL database.
 
 Build: MinGW-w64 GCC, either on Windows or as a WSL cross compiler. No HWiNFO SDK
 or third-party native library is needed.
-
-## Build
-
-From the repository root, with a Windows MinGW compiler on PATH:
-
-```powershell
-pwsh -NoProfile -File .\scripts\build.ps1 -Compiler gcc
-```
-
-Or cross-build using WSL:
-
-```sh
-sudo apt-get install gcc-mingw-w64-x86-64
-```
-
-```powershell
-pwsh -NoProfile -File .\scripts\build.ps1 -UseWsl
-```
-
-The executable is `build/hwtrace.exe`. A direct compiler invocation also works:
-
-```sh
-x86_64-w64-mingw32-gcc -std=c11 -O2 -Wall -Wextra collector.c -o build/hwtrace.exe
-```
-
-Create `build/` before using the direct command.
 
 ## Configure and run
 
@@ -118,6 +130,32 @@ Profiles are loaded at startup. Restart the collector to apply a change. Names
 can be localized or customized; inspect HWiNFO or stored metadata when refining
 rules. Stable IDs distinguish duplicates within a session, but verify them again
 after hardware or HWiNFO changes.
+
+## Build
+
+From the repository root, with a Windows MinGW compiler on PATH:
+
+```powershell
+pwsh -NoProfile -File .\scripts\build.ps1 -Compiler gcc
+```
+
+Or cross-build using WSL:
+
+```sh
+sudo apt-get install gcc-mingw-w64-x86-64
+```
+
+```powershell
+pwsh -NoProfile -File .\scripts\build.ps1 -UseWsl
+```
+
+The executable is `build/hwtrace.exe`. A direct compiler invocation also works:
+
+```sh
+x86_64-w64-mingw32-gcc -std=c11 -O2 -Wall -Wextra collector.c -o build/hwtrace.exe
+```
+
+Create `build/` before using the direct command.
 
 ## Storage, timing and limits
 
