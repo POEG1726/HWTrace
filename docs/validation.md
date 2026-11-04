@@ -13,6 +13,8 @@ desktop screenshot, SSH accounts and stress tools are not required.
 | Images | Binary upload, acknowledgement, hash/metadata and invalid input |
 | Concurrency | Image and telemetry initialize one database concurrently |
 | Startup | Process presence branches and native/managed event interoperability |
+| Process detection | Exact/case-insensitive lists, invalid names, y-cruncher launcher and direct optimized worker, unrelated-binary exclusion, native/startup parity |
+| Test lifecycle | Per-tool events, failed snapshot retention, grace cancellation on test changes, never-seen and zero-grace cases |
 | Cleanup | Slow upload does not block native execution; cancellation releases resources |
 | Geometry | Physical bounds under DPI-unaware caller; original context restored |
 | Pixel copy | Both extreme corners of an offscreen bitmap are copied |

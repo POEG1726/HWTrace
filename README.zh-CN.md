@@ -60,9 +60,11 @@ HWiNFO 共享内存 -> 原生 C 采集器 -- 持久 SSH / JSONL --> SQLite WAL
 - **500 ms 采样：** 直接读取 HWiNFO Shared Memory，采集机使用固定大小的内存队列，
   不写本地遥测数据库、日志或截图文件。
 - **可配置传感器：** 保留名称、单位、传感器 ID、实例和读数 ID，以区分重名项目。
-- **测试事件：** 默认监控 `TM5.exe`，记录检测到的进程出现、退出和手动标记。
+- **测试事件：** 默认监控 `TM5.exe,y-cruncher.exe`，运行其中一种测试即可自动识别，
+  记录检测到的进程出现、退出和手动标记。也识别 y-cruncher 安装目录 `Binaries` 中
+  直接启动的计算程序；启动截图使用相同检测规则。
   启动脚本不会启动 TM5 或其他压力测试程序。
-- **退出后继续记录：** 最后一个同名进程退出后继续采集 10 分钟；期间重启则取消停止。
+- **退出后继续记录：** 测试进程全部退出后继续采集 10 分钟；期间检测到任一种测试则取消停止。
   从未检测到目标进程时不会因此自动停止。延时和进程名称可配置。
 - **断线重连：** SSH 重连后重试未确认的记录，接收端按会话与序号去重。
 - **时间关联：** 保存 UTC 时间、单调计时和截图实际复制区间，便于对齐记录。
@@ -72,7 +74,7 @@ HWiNFO 共享内存 -> 原生 C 采集器 -- 持久 SSH / JSONL --> SQLite WAL
 
 ```powershell
 $config = Get-Content .\collector.json -Raw | ConvertFrom-Json
-.\build\hwtrace.exe .\ddr5.filter $config.ssh_command TM5.exe 600
+.\build\hwtrace.exe .\ddr5.filter $config.ssh_command 'TM5.exe,y-cruncher.exe' 600
 ```
 
 ## 传感器配置

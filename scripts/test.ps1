@@ -11,7 +11,7 @@ try {
     $nodeExe = (Get-Command $Node -ErrorAction Stop).Source
     & $nodeExe tests/test_dashboard_ui.js
     if ($LASTEXITCODE -ne 0) { throw 'Dashboard interaction tests failed.' }
-    foreach ($name in @('units', 'profile', 'start_gate')) {
+    foreach ($name in @('units', 'profile', 'start_gate', 'process')) {
         & (Join-Path $root "build/test_native_$name.exe")
         if ($LASTEXITCODE -ne 0) { throw "Native test failed: $name" }
     }

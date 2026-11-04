@@ -1,7 +1,7 @@
 {
   "ssh_command": "ssh.exe -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 CHANGE_ME_RECEIVER CHANGE_ME_PYTHON_AND_RECEIVER_COMMAND --ack",
   "filter": "ddr5.filter",
-  "process": "TM5.exe",
+  "process": "TM5.exe,y-cruncher.exe",
   "grace_seconds": 600,
   "executable": "build/hwtrace.exe"
 }

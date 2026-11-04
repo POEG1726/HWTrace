@@ -1,7 +1,10 @@
 function Get-MonitoredProcessPresent {
-    param([Parameter(Mandatory)][string]$ProcessName)
-    $name = [IO.Path]::GetFileNameWithoutExtension($ProcessName)
-    return @(Get-Process -Name $name -ErrorAction SilentlyContinue).Count -gt 0
+    param([Parameter(Mandatory)][string]$ProcessName,
+          [string]$CollectorPath = (Join-Path $PSScriptRoot 'build/hwtrace.exe'))
+    & $CollectorPath --process-present $ProcessName
+    if ($LASTEXITCODE -eq 2) { throw 'Cannot inspect monitored processes or invalid process list.' }
+    if ($LASTEXITCODE -notin @(0, 1)) { throw "Process inspection failed: $LASTEXITCODE" }
+    return $LASTEXITCODE -eq 0
 }
 
 function Import-DesktopCapture {
@@ -38,11 +41,12 @@ function Send-StartupScreenshot {
 }
 
 function Initialize-StartupContext {
-    param([Parameter(Mandatory)][string]$ProcessName, [Parameter(Mandatory)][string]$SshCommand)
+    param([Parameter(Mandatory)][string]$ProcessName, [Parameter(Mandatory)][string]$SshCommand,
+          [string]$CollectorPath = (Join-Path $PSScriptRoot 'build/hwtrace.exe'))
     $result = [ordered]@{
         Id = [Guid]::NewGuid().ToString('N')
         StartedAt = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-        ProcessAlreadyRunning = (Get-MonitoredProcessPresent -ProcessName $ProcessName)
+        ProcessAlreadyRunning = (Get-MonitoredProcessPresent -ProcessName $ProcessName -CollectorPath $CollectorPath)
         Event = 'startup_waiting_for_process'
     }
     $result.Worker = $null

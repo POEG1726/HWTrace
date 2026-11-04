@@ -57,7 +57,8 @@ read-only process on the receiver.
 - Select readings by configurable names; identify duplicates by HWiNFO sensor ID,
   sensor instance and reading ID, rather than display name alone.
 - Store reading names, units, UTC timestamps and monotonic collection timing.
-- Record process presence/exit and manual markers. Default process: `TM5.exe`.
+- Record process presence/exit and manual markers. Defaults: TM5 and y-cruncher
+  (`TM5.exe,y-cruncher.exe`), so either test is detected without changing config.
 - Continue for 10 minutes after the last monitored process exits; cancel the stop
   if it restarts. Never auto-stop before observing the process.
 - Reconnect SSH and retry unacknowledged records; deduplicate retries in SQLite.
@@ -106,7 +107,7 @@ For telemetry without screenshots, use the native collector directly:
 
 ```powershell
 $config = Get-Content .\collector.json -Raw | ConvertFrom-Json
-.\build\hwtrace.exe .\ddr5.filter $config.ssh_command TM5.exe 600
+.\build\hwtrace.exe .\ddr5.filter $config.ssh_command 'TM5.exe,y-cruncher.exe' 600
 ```
 
 [Deployment instructions](docs/deployment.md) include Linux/WSL and Windows

@@ -10,6 +10,7 @@
 #include <math.h>
 #include <time.h>
 #include <wchar.h>
+#include "process_monitor.h"
 
 #define QSIZE 128
 #define LINE 65536
@@ -22,7 +23,7 @@ static char session[64];
 static unsigned seq;
 static char patterns[MAXPAT][128];
 static int npat;
-static char process_name[128] = "TM5.exe";
+static char process_name[1024] = DEFAULT_PROCESS_SPEC;
 static unsigned grace_ms = 600000;
 static char ssh_command[4096];
 static HANDLE input_write, output_read, child;
@@ -258,11 +259,28 @@ static int is_running(void) {
     p.dwSize = sizeof(p);
     if (Process32First(h, &p))
         do {
-            if (!_stricmp(p.szExeFile, process_name)) {
-                found = 1;
-                break;
+            for (unsigned i = 0; i < process_count; i++) {
+                if (!_stricmp(p.szExeFile, process_names[i])) {
+                    found |= 1 << i;
+                } else if (!_stricmp(process_names[i], "y-cruncher.exe") &&
+                           p.szExeFile[0] >= '0' && p.szExeFile[0] <= '9') {
+                    wchar_t path[32768];
+                    DWORD length = sizeof path / sizeof path[0];
+                    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                                 p.th32ProcessID);
+                    if (process) {
+                        if (QueryFullProcessImageNameW(process, 0, path, &length) &&
+                            is_y_cruncher_binary(path))
+                            found |= 1 << i;
+                        CloseHandle(process);
+                    }
+                }
             }
         } while (Process32Next(h, &p));
+    else {
+        CloseHandle(h);
+        return -1;
+    }
     CloseHandle(h);
     return found;
 }
@@ -418,13 +436,51 @@ static BOOL WINAPI control(DWORD code) {
     }
     return FALSE;
 }
+
+typedef struct {
+    int seen, previous;
+    ULONGLONG deadline;
+} ProcessState;
+
+static int update_process_state(ProcessState *state, int running, ULONGLONG now) {
+    if (running < 0)
+        return 0; /* A failed snapshot is not an exit observation. */
+    for (unsigned i = 0; i < process_count; i++) {
+        int bit = 1 << i;
+        if ((running & bit) && !(state->previous & bit))
+            event("process_start", process_names[i]);
+        if (!(running & bit) && (state->previous & bit))
+            event("process_exit", process_names[i]);
+    }
+    if (running) {
+        state->seen = 1;
+        state->deadline = 0;
+    } else if (state->previous) {
+        state->deadline = now + grace_ms;
+    }
+    state->previous = running;
+    if (state->seen && !running && state->deadline && now >= state->deadline) {
+        event("auto_stop", process_name);
+        return 1;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     FILE *f;
     char buf[256];
     HANDLE thread;
-    int seen = 0, was = 0, metadata = 0, missing = 0;
-    ULONGLONG deadline = 0, next = 0;
+    int metadata = 0, missing = 0;
+    ProcessState process_state = {0};
+    ULONGLONG next = 0;
     collection_start_tick = GetTickCount64();
+    if (argc >= 2 && !strcmp(argv[1], "--process-present")) {
+        int running;
+        if (!configure_processes(argc > 2 ? argv[2] : DEFAULT_PROCESS_SPEC))
+            return 2;
+        running = is_running();
+        return running < 0 ? 2 : (running ? 0 : 1);
+    }
     if (argc >= 2 && !strcmp(argv[1], "--diagnose")) {
         size_t bytes = 0;
         unsigned char *b = snapshot(&bytes);
@@ -476,7 +532,11 @@ int main(int argc, char **argv) {
     }
     if (argc < 3) {
         fprintf(stderr,
-                "usage: hwtrace.exe filter.txt \"ssh command\" [process.exe] [grace_seconds]\n");
+                "usage: hwtrace.exe filter.txt \"ssh command\" [process.exe,...] [grace_seconds]\n");
+        return 2;
+    }
+    if (!configure_processes(argc > 3 ? argv[3] : DEFAULT_PROCESS_SPEC)) {
+        fprintf(stderr, "Invalid process list: supply 1-16 unique executable names separated by commas.\n");
         return 2;
     }
     f = fopen(argv[1], "r");
@@ -532,22 +592,8 @@ int main(int argc, char **argv) {
                 event("marker", msg);
         }
         running = is_running();
-        if (running >= 0) {
-            if (running && !was) {
-                event("process_start", process_name);
-                seen = 1;
-                deadline = 0;
-            }
-            if (!running && was) {
-                event("process_exit", process_name);
-                deadline = now + grace_ms;
-            }
-            was = running;
-            if (seen && !running && deadline && now >= deadline) {
-                event("auto_stop", process_name);
-                break;
-            }
-        }
+        if (update_process_state(&process_state, running, now))
+            break;
         if (!metadata) {
             n = read_cycle(1);
             if (n >= 0) {

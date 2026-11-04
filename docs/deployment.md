@@ -48,12 +48,33 @@ Copy the example to `collector.json` and edit:
 | `ssh_command` | Noninteractive receiver command, including `--ack` |
 | `executable` | Collector executable relative to the launcher |
 | `filter` | Filter file relative to the launcher |
-| `process` | Executable name to observe; default `TM5.exe` |
+| `process` | Comma-separated executable names; default `TM5.exe,y-cruncher.exe` |
 | `grace_seconds` | Post-exit delay; default `600` |
 
 Versioned executable paths can stage an update beside a running collector. Copies
 do not hot-reload a process. Restart manually after updates, and keep the receiver
 compatible with the collector/launcher.
+
+Run either TM5 or y-cruncher without editing the configuration between tests.
+Existing configurations containing only `TM5.exe` keep that behavior: change
+`process` to `TM5.exe,y-cruncher.exe` to enable both. Single executable names remain
+supported; a list accepts up to 16 unique names, matched without regard to case.
+Wildcards and executable paths are not accepted.
+
+The `y-cruncher.exe` entry also detects optimized executables whose names start
+with a digit in a `Binaries` directory with a sibling `y-cruncher.exe` launcher in
+the parent directory, even when that launcher is not running. Inspecting these
+workers requires permission to query their executable path; keep the installed
+directory layout. Custom layouts can instead list exact executable names.
+Startup screenshot detection uses the same native check. Process start/exit
+events identify each configured name; a y-cruncher launcher/worker transition
+counts as one monitored tool while at least one is observed. These events report
+process presence, not test iterations, calculation failures or error counts.
+
+Collection waits indefinitely until a configured test is first observed, then
+continues for `grace_seconds` after all observed test processes exit. Detection
+of either test during that interval cancels the pending stop. No test program is
+launched by HWTrace.
 
 ## Manual startup
 

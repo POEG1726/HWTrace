@@ -14,7 +14,7 @@ try {
     }
     $sources = @(@{ Source = 'collector.c'; Output = 'build/hwtrace.exe' })
     if ($Tests) {
-        foreach ($name in @('units', 'profile', 'snapshot', 'start_gate')) {
+        foreach ($name in @('units', 'profile', 'snapshot', 'start_gate', 'process')) {
             $sources += @{ Source = "tests/test_native_$name.c"; Output = "build/test_native_$name.exe" }
         }
     }
